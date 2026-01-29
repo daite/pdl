@@ -129,6 +129,12 @@ fn download_episode(episode: &Episode) -> Result<()> {
     let extension = get_extension_from_url(&episode.url);
     let filepath = download_dir.join(format!("{}.{}", filename, extension));
 
+    // Check if file already exists
+    if filepath.exists() {
+        println!("⏭ Already downloaded: {}", filepath.display());
+        return Ok(());
+    }
+
     // Download file
     let client = Client::new();
     let mut response = client
@@ -190,7 +196,7 @@ fn sanitize_filename(title: &str) -> String {
 
 fn get_extension_from_url(url: &str) -> String {
     let path = url.split('?').next().unwrap_or(url);
-    path.split('.').last().unwrap_or("mp3").to_lowercase()
+    path.split('.').next_back().unwrap_or("mp3").to_lowercase()
 }
 
 #[cfg(test)]
