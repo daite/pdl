@@ -76,7 +76,8 @@ fn main() -> Result<()> {
 }
 
 fn display_banner() {
-    println!(r#"
+    println!(
+        r#"
 ╔═══════════════════════════════════════════════════════╗
 ║                                                       ║
 ║   ██████╗  ██████╗ ██████╗  ██████╗ █████╗ ███████╗ ║
@@ -89,7 +90,8 @@ fn display_banner() {
 ║              Podcast Downloader v0.1.0                ║
 ║                                                       ║
 ╚═══════════════════════════════════════════════════════╝
-"#);
+"#
+    );
 }
 
 fn fetch_episodes(url: &str, limit: usize) -> Result<Vec<Episode>> {
@@ -188,10 +190,7 @@ fn sanitize_filename(title: &str) -> String {
 
 fn get_extension_from_url(url: &str) -> String {
     let path = url.split('?').next().unwrap_or(url);
-    path.split('.')
-        .last()
-        .unwrap_or("mp3")
-        .to_lowercase()
+    path.split('.').last().unwrap_or("mp3").to_lowercase()
 }
 
 #[cfg(test)]
@@ -225,10 +224,22 @@ mod tests {
 
     #[test]
     fn test_get_extension_from_url_basic() {
-        assert_eq!(get_extension_from_url("https://example.com/file.mp3"), "mp3");
-        assert_eq!(get_extension_from_url("https://example.com/file.MP3"), "mp3");
-        assert_eq!(get_extension_from_url("https://example.com/audio.m4a"), "m4a");
-        assert_eq!(get_extension_from_url("https://example.com/video.mp4"), "mp4");
+        assert_eq!(
+            get_extension_from_url("https://example.com/file.mp3"),
+            "mp3"
+        );
+        assert_eq!(
+            get_extension_from_url("https://example.com/file.MP3"),
+            "mp3"
+        );
+        assert_eq!(
+            get_extension_from_url("https://example.com/audio.m4a"),
+            "m4a"
+        );
+        assert_eq!(
+            get_extension_from_url("https://example.com/video.mp4"),
+            "mp4"
+        );
     }
 
     #[test]
@@ -246,9 +257,15 @@ mod tests {
     #[test]
     fn test_get_extension_from_url_no_extension() {
         // Note: function splits by '.' so returns last segment after dot
-        assert_eq!(get_extension_from_url("https://example.com/file"), "com/file");
+        assert_eq!(
+            get_extension_from_url("https://example.com/file"),
+            "com/file"
+        );
         // URL with path ending in extension-less filename
-        assert_eq!(get_extension_from_url("http://example/podcast"), "http://example/podcast");
+        assert_eq!(
+            get_extension_from_url("http://example/podcast"),
+            "http://example/podcast"
+        );
     }
 
     #[test]
