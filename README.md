@@ -1,5 +1,7 @@
 # pdl (Podcast Downloader)
 
+[![CI](https://github.com/daite/pdl/actions/workflows/ci.yml/badge.svg)](https://github.com/daite/pdl/actions/workflows/ci.yml)
+
 A command-line application in Rust that fetches podcast episodes from an RSS feed, allows interactive episode selection, and downloads audio files with a fancy progress bar.
 
 ## Features
