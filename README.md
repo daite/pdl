@@ -2,10 +2,12 @@
 
 [![CI](https://github.com/daite/pdl/actions/workflows/ci.yml/badge.svg)](https://github.com/daite/pdl/actions/workflows/ci.yml)
 
-A command-line application in Rust that fetches podcast episodes from an RSS feed, allows interactive episode selection, and downloads audio files with a fancy progress bar.
+A command-line application in Rust that fetches podcast episodes from multiple RSS feeds, allows interactive feed and episode selection, and downloads audio files with a fancy progress bar.
 
 ## Features
 
+- Support for multiple podcast feeds
+- Interactive feed selection
 - Fetches podcast episodes from RSS feeds
 - Interactive episode selection with arrow keys
 - Beautiful ASCII art banner
@@ -58,20 +60,30 @@ pdl --help
 ## How it works
 
 1. Application displays a banner
-2. Fetches RSS feed from the configured URL
-3. Lists available episodes (limited by `-n` flag)
-4. User selects an episode using arrow keys
-5. Episode downloads with progress bar
-6. Audio file saved to `podcast-downloads/` directory
+2. User selects a podcast feed from available options
+3. Fetches RSS feed from the selected URL
+4. Lists available episodes (limited by `-n` flag)
+5. User selects an episode using arrow keys
+6. Episode downloads with progress bar
+7. Audio file saved to `podcast-downloads/` directory
 
 ## Configuration
 
-The RSS feed URL is currently hardcoded in the source:
+The RSS feeds are configured in the `FEEDS` array in `src/main.rs`:
 ```rust
-let rss_url = "https://omny.fm/shows/cozy-up/playlists/doctor.rss";
+const FEEDS: &[PodcastFeed] = &[
+    PodcastFeed {
+        name: "Cozy Up (Doctor)",
+        url: "https://omny.fm/shows/cozy-up/playlists/doctor.rss",
+    },
+    PodcastFeed {
+        name: "Cozy Up (Podcast)",
+        url: "https://omny.fm/shows/cozy-up/playlists/podcast.rss",
+    },
+];
 ```
 
-To change the feed, modify this line in `src/main.rs` and rebuild.
+To add or modify feeds, edit this array in `src/main.rs` and rebuild.
 
 ## Dependencies
 
