@@ -26,6 +26,22 @@ struct Episode {
     url: String,
 }
 
+struct PodcastFeed {
+    name: &'static str,
+    url: &'static str,
+}
+
+const FEEDS: &[PodcastFeed] = &[
+    PodcastFeed {
+        name: "Cozy Up (Doctor)",
+        url: "https://omny.fm/shows/cozy-up/playlists/doctor.rss",
+    },
+    PodcastFeed {
+        name: "Cozy Up (Podcast)",
+        url: "https://omny.fm/shows/cozy-up/playlists/podcast.rss",
+    },
+];
+
 fn main() -> Result<()> {
     // Parse CLI arguments (before banner so -v works cleanly)
     let args = Args::parse();
@@ -33,13 +49,21 @@ fn main() -> Result<()> {
     // Display banner
     display_banner();
 
-    // Hardcoded RSS feed URL
-    let rss_url = "https://omny.fm/shows/cozy-up/playlists/doctor.rss";
+    // Select podcast feed
+    let feed_names: Vec<&str> = FEEDS.iter().map(|f| f.name).collect();
+    let selected_feed_name = Select::new("Select a podcast feed:", feed_names)
+        .prompt()
+        .context("Failed to get feed selection")?;
 
-    println!("Fetching RSS feed...\n");
+    let selected_feed = FEEDS
+        .iter()
+        .find(|f| f.name == selected_feed_name)
+        .context("Could not find selected feed")?;
+
+    println!("\nFetching RSS feed...\n");
 
     // Fetch and parse RSS feed
-    let episodes = fetch_episodes(rss_url, args.n)?;
+    let episodes = fetch_episodes(selected_feed.url, args.n)?;
 
     if episodes.is_empty() {
         println!("No episodes found in the feed.");
