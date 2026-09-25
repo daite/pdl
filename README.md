@@ -9,9 +9,10 @@ A command-line application in Rust that fetches podcast episodes from multiple R
 - Support for multiple podcast feeds
 - Interactive feed selection
 - Fetches podcast episodes from RSS feeds
-- Interactive episode selection with arrow keys
+- Interactive multi-episode selection (arrow keys + space to toggle)
+- Concurrent downloads with a configurable worker limit (`-j`)
 - Beautiful ASCII art banner
-- Real-time download progress bar with:
+- Real-time per-episode progress bars with:
   - Elapsed time
   - Progress percentage
   - Download speed
@@ -47,6 +48,11 @@ pdl
 pdl -n 5
 ```
 
+### Limit concurrent downloads (default 3)
+```bash
+pdl -j 5
+```
+
 ### Show version
 ```bash
 pdl -v
@@ -63,9 +69,9 @@ pdl --help
 2. User selects a podcast feed from available options
 3. Fetches RSS feed from the selected URL
 4. Lists available episodes (limited by `-n` flag)
-5. User selects an episode using arrow keys
-6. Episode downloads with progress bar
-7. Audio file saved to `podcast-downloads/` directory
+5. User selects one or more episodes (space to toggle, enter to confirm)
+6. Episodes download in parallel on a bounded pool of worker threads (`-j`), each with its own progress bar
+7. Audio files saved to `podcast-downloads/` directory (already downloaded files are skipped)
 
 ## Configuration
 

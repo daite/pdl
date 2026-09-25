@@ -1,12 +1,14 @@
 use anyhow::{Context, Result};
 use clap::Parser;
-use indicatif::{ProgressBar, ProgressStyle};
-use inquire::Select;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use inquire::{MultiSelect, Select};
 use reqwest::blocking::Client;
 use rss::Channel;
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
 
 /// Podcast Downloader - Download podcast episodes from RSS feeds
 #[derive(Parser, Debug)]
@@ -19,6 +21,10 @@ struct Args {
     /// Number of episodes to display
     #[arg(short, long, default_value_t = 10)]
     n: usize,
+
+    /// Maximum number of concurrent downloads
+    #[arg(short, long, default_value_t = 3, value_parser = clap::value_parser!(u8).range(1..))]
+    jobs: u8,
 }
 
 struct Episode {
@@ -70,31 +76,57 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Create interactive selection menu
+    // Create interactive multi-selection menu
     let episode_titles: Vec<String> = episodes
         .iter()
         .enumerate()
         .map(|(i, ep)| format!("{}. {}", i + 1, ep.title))
         .collect();
 
-    let selection = Select::new("Select an episode to download:", episode_titles)
-        .prompt()
-        .context("Failed to get user selection")?;
+    let selected: Vec<&Episode> = MultiSelect::new(
+        "Select episodes to download (space to toggle):",
+        episode_titles,
+    )
+    .raw_prompt()
+    .context("Failed to get user selection")?
+    .into_iter()
+    .map(|opt| &episodes[opt.index])
+    .collect();
 
-    // Extract index from selection
-    let selected_index = episodes
-        .iter()
-        .position(|ep| selection.contains(&ep.title))
-        .context("Could not find selected episode")?;
+    if selected.is_empty() {
+        println!("No episodes selected.");
+        return Ok(());
+    }
 
-    let selected_episode = &episodes[selected_index];
+    println!(
+        "\nDownloading {} episode(s) with up to {} concurrent job(s)...\n",
+        selected.len(),
+        args.jobs
+    );
 
-    println!("\nDownloading: {}", selected_episode.title);
+    // Download the episodes concurrently
+    let results = download_episodes(&selected, args.jobs as usize)?;
 
-    // Download the episode
-    download_episode(selected_episode)?;
+    println!();
+    let mut failed = 0;
+    for (episode, result) in selected.iter().zip(&results) {
+        match result {
+            Ok(DownloadOutcome::Downloaded(path)) => println!("✓ Saved to: {}", path.display()),
+            Ok(DownloadOutcome::Skipped(path)) => {
+                println!("⏭ Already downloaded: {}", path.display())
+            }
+            Err(e) => {
+                failed += 1;
+                println!("✗ {}: {:#}", episode.title, e);
+            }
+        }
+    }
 
-    println!("\n✓ Download complete!");
+    if failed > 0 {
+        anyhow::bail!("{} of {} download(s) failed", failed, selected.len());
+    }
+
+    println!("\n✓ All downloads complete!");
 
     Ok(())
 }
@@ -143,11 +175,66 @@ fn fetch_episodes(url: &str, limit: usize) -> Result<Vec<Episode>> {
     Ok(episodes)
 }
 
-fn download_episode(episode: &Episode) -> Result<()> {
-    // Create podcast-downloads directory if it doesn't exist
+enum DownloadOutcome {
+    Downloaded(PathBuf),
+    Skipped(PathBuf),
+}
+
+/// Download episodes using a bounded pool of worker threads.
+///
+/// Workers pull the next job from a shared atomic cursor, so at most `jobs`
+/// downloads run at once. Results are returned in the same order as `episodes`.
+fn download_episodes(episodes: &[&Episode], jobs: usize) -> Result<Vec<Result<DownloadOutcome>>> {
     let download_dir = Path::new("podcast-downloads");
     fs::create_dir_all(download_dir).context("Failed to create download directory")?;
 
+    // A single client is shared by all workers so they reuse the connection pool
+    let client = Client::new();
+    let multi = MultiProgress::new();
+    let style = ProgressStyle::default_bar()
+        .template("{msg:30!} [{bar:30.cyan/blue}] {bytes}/{total_bytes} {bytes_per_sec} ({eta})")
+        .context("Failed to create progress bar template")?
+        .progress_chars("=>-");
+
+    let next = AtomicUsize::new(0);
+    let workers = jobs.min(episodes.len());
+
+    let mut results: Vec<(usize, Result<DownloadOutcome>)> = thread::scope(|s| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                s.spawn(|| {
+                    let mut done = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(episode) = episodes.get(i) else {
+                            break;
+                        };
+                        let result =
+                            download_episode(&client, &multi, &style, download_dir, episode);
+                        done.push((i, result));
+                    }
+                    done
+                })
+            })
+            .collect();
+
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().expect("download worker panicked"))
+            .collect()
+    });
+
+    results.sort_by_key(|(i, _)| *i);
+    Ok(results.into_iter().map(|(_, r)| r).collect())
+}
+
+fn download_episode(
+    client: &Client,
+    multi: &MultiProgress,
+    style: &ProgressStyle,
+    download_dir: &Path,
+    episode: &Episode,
+) -> Result<DownloadOutcome> {
     // Sanitize filename
     let filename = sanitize_filename(&episode.title);
     let extension = get_extension_from_url(&episode.url);
@@ -155,15 +242,14 @@ fn download_episode(episode: &Episode) -> Result<()> {
 
     // Check if file already exists
     if filepath.exists() {
-        println!("⏭ Already downloaded: {}", filepath.display());
-        return Ok(());
+        return Ok(DownloadOutcome::Skipped(filepath));
     }
 
     // Download file
-    let client = Client::new();
     let mut response = client
         .get(&episode.url)
         .send()
+        .and_then(|r| r.error_for_status())
         .context("Failed to start download")?;
 
     let total_size = response
@@ -171,39 +257,42 @@ fn download_episode(episode: &Episode) -> Result<()> {
         .context("Failed to get content length")?;
 
     // Create progress bar
-    let pb = ProgressBar::new(total_size);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
-            .context("Failed to create progress bar template")?
-            .progress_chars("=>-"),
-    );
+    let pb = multi.add(ProgressBar::new(total_size));
+    pb.set_style(style.clone());
+    pb.set_message(episode.title.clone());
 
-    // Download with progress
-    let mut file = File::create(&filepath).context("Failed to create output file")?;
-    let mut downloaded: u64 = 0;
-
-    loop {
+    // Download to a temporary file so an interrupted download isn't mistaken
+    // for a finished one on the next run
+    let part_path = filepath.with_extension(format!("{}.part", extension));
+    let result = (|| -> Result<()> {
+        let mut file = File::create(&part_path).context("Failed to create output file")?;
         let mut buffer = vec![0; 8192];
-        let bytes_read = std::io::Read::read(&mut response, &mut buffer)
-            .context("Failed to read download chunk")?;
 
-        if bytes_read == 0 {
-            break;
+        loop {
+            let bytes_read = std::io::Read::read(&mut response, &mut buffer)
+                .context("Failed to read download chunk")?;
+
+            if bytes_read == 0 {
+                break;
+            }
+
+            file.write_all(&buffer[..bytes_read])
+                .context("Failed to write to file")?;
+
+            pb.inc(bytes_read as u64);
         }
 
-        file.write_all(&buffer[..bytes_read])
-            .context("Failed to write to file")?;
+        fs::rename(&part_path, &filepath).context("Failed to finalize output file")
+    })();
 
-        downloaded += bytes_read as u64;
-        pb.set_position(downloaded);
+    if result.is_err() {
+        let _ = fs::remove_file(&part_path);
+        pb.abandon();
+    } else {
+        pb.finish();
     }
 
-    pb.finish_with_message("Download complete");
-
-    println!("Saved to: {}", filepath.display());
-
-    Ok(())
+    result.map(|()| DownloadOutcome::Downloaded(filepath))
 }
 
 fn sanitize_filename(title: &str) -> String {
